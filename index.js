@@ -80,11 +80,24 @@ async function initializeMCPClient() {
       }
     });
     
-    console.log('✅ MCP client initialized');
+    console.log('✅ MCP client initialized:', {
+      status: initResponse.status,
+      hasData: !!initResponse.data
+    });
+    
+    // Check if response is SSE format
+    if (typeof initResponse.data === 'string' && initResponse.data.includes('event: message')) {
+      console.log('📡 Received SSE format response');
+    }
     mcpInitialized = true;
     return true;
   } catch (error) {
-    console.error('❌ MCP initialization failed:', error.message);
+    console.error('❌ MCP initialization failed:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message
+    });
     return false;
   }
 }
@@ -114,10 +127,19 @@ async function callMCPServer(method, params = {}) {
       }
     });
     
-    console.log('✅ MCP response received');
+    console.log('✅ MCP response received:', {
+      status: response.status,
+      dataType: typeof response.data,
+      dataPreview: typeof response.data === 'string' ? response.data.substring(0, 200) : 'object'
+    });
     return response.data;
   } catch (error) {
-    console.error('❌ MCP call failed:', error.message);
+    console.error('❌ MCP call failed:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message
+    });
     // Reset initialization on error
     mcpInitialized = false;
     throw error;
