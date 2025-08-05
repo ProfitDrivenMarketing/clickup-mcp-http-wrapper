@@ -16,11 +16,19 @@ let sessionId = null;
 // Initialize MCP session
 async function initializeMCPSession() {
   try {
-    // Get session from SSE endpoint
+    console.log('🔄 Initializing MCP session...');
+    
+    // Get session from SSE endpoint with longer timeout and different approach
     const sseResponse = await axios.get(`${MCP_SERVER_URL}/sse`, {
-      headers: { 'Accept': 'text/event-stream' },
-      timeout: 5000
+      headers: { 
+        'Accept': 'text/event-stream',
+        'Cache-Control': 'no-cache'
+      },
+      timeout: 10000, // Increased timeout
+      responseType: 'text'
     });
+    
+    console.log('📡 SSE Response:', sseResponse.data);
     
     // Extract session ID from SSE response
     const match = sseResponse.data.match(/sessionId=([a-f0-9-]+)/);
@@ -28,11 +36,17 @@ async function initializeMCPSession() {
       sessionId = match[1];
       console.log('✅ MCP Session initialized:', sessionId);
       return sessionId;
+    } else {
+      console.log('⚠️ No session ID found in SSE response');
     }
   } catch (error) {
     console.error('❌ Failed to initialize MCP session:', error.message);
+    
+    // Fallback: try to generate a simple session ID
+    sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    console.log('🔄 Using fallback session ID:', sessionId);
   }
-  return null;
+  return sessionId;
 }
 
 // Call MCP server
