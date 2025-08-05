@@ -10,7 +10,7 @@ app.use(express.json());
 // Your existing MCP server URL
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'https://clickup-mcp-server-production-872b.up.railway.app';
 
-// Session management
+// Session management (simplified)
 let sessionId = null;
 
 // Initialize MCP session
@@ -49,9 +49,56 @@ async function initializeMCPSession() {
   return sessionId;
 }
 
+// MCP client state
+let mcpInitialized = false;
+
+// Initialize MCP client properly
+async function initializeMCPClient() {
+  if (mcpInitialized) return true;
+  
+  try {
+    console.log('🔄 Initializing MCP client...');
+    
+    const initResponse = await axios.post(`${MCP_SERVER_URL}/mcp`, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {
+          tools: {}
+        },
+        clientInfo: {
+          name: 'n8n-wrapper',
+          version: '1.0.0'
+        }
+      }
+    }, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream'
+      }
+    });
+    
+    console.log('✅ MCP client initialized');
+    mcpInitialized = true;
+    return true;
+  } catch (error) {
+    console.error('❌ MCP initialization failed:', error.message);
+    return false;
+  }
+}
+
 // Call MCP server
 async function callMCPServer(method, params = {}) {
-  // Try the direct /mcp endpoint first (might work better)
+  // Initialize MCP client first if not done
+  if (!mcpInitialized) {
+    const initialized = await initializeMCPClient();
+    if (!initialized) {
+      throw new Error('Failed to initialize MCP client');
+    }
+  }
+  
   try {
     console.log(`🔄 Calling MCP: ${method}`);
     
@@ -69,32 +116,11 @@ async function callMCPServer(method, params = {}) {
     
     console.log('✅ MCP response received');
     return response.data;
-  } catch (directError) {
-    console.log('⚠️ Direct /mcp failed, trying /messages with session...');
-    
-    // Fallback to messages endpoint with session
-    if (!sessionId) {
-      await initializeMCPSession();
-    }
-    
-    try {
-      const response = await axios.post(`${MCP_SERVER_URL}/messages?sessionId=${sessionId}`, {
-        jsonrpc: '2.0',
-        id: Date.now(),
-        method,
-        params
-      }, {
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      return response.data;
-    } catch (sessionError) {
-      console.error('❌ Both MCP approaches failed:', {
-        direct: directError.message,
-        session: sessionError.message
-      });
-      throw sessionError;
-    }
+  } catch (error) {
+    console.error('❌ MCP call failed:', error.message);
+    // Reset initialization on error
+    mcpInitialized = false;
+    throw error;
   }
 }
 
@@ -232,7 +258,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 HTTP-to-MCP Wrapper running on port ${PORT}`);
   console.log(`📡 MCP Server: ${MCP_SERVER_URL}`);
-  
-  // Initialize session on startup
-  initializeMCPSession();
+  console.log('✅ Ready to handle requests');
 });
