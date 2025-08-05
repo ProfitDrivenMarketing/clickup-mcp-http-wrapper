@@ -51,26 +51,50 @@ async function initializeMCPSession() {
 
 // Call MCP server
 async function callMCPServer(method, params = {}) {
-  if (!sessionId) {
-    await initializeMCPSession();
-  }
-  
+  // Try the direct /mcp endpoint first (might work better)
   try {
-    const response = await axios.post(`${MCP_SERVER_URL}/messages?sessionId=${sessionId}`, {
+    console.log(`🔄 Calling MCP: ${method}`);
+    
+    const response = await axios.post(`${MCP_SERVER_URL}/mcp`, {
       jsonrpc: '2.0',
       id: Date.now(),
       method,
       params
     }, {
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream'
+      }
     });
     
+    console.log('✅ MCP response received');
     return response.data;
-  } catch (error) {
-    console.error('❌ MCP call failed:', error.message);
-    // Try reinitializing session on error
-    sessionId = null;
-    throw error;
+  } catch (directError) {
+    console.log('⚠️ Direct /mcp failed, trying /messages with session...');
+    
+    // Fallback to messages endpoint with session
+    if (!sessionId) {
+      await initializeMCPSession();
+    }
+    
+    try {
+      const response = await axios.post(`${MCP_SERVER_URL}/messages?sessionId=${sessionId}`, {
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method,
+        params
+      }, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      return response.data;
+    } catch (sessionError) {
+      console.error('❌ Both MCP approaches failed:', {
+        direct: directError.message,
+        session: sessionError.message
+      });
+      throw sessionError;
+    }
   }
 }
 
