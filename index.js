@@ -10,9 +10,6 @@ app.use(express.json());
 // Your existing MCP server URL
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'https://clickup-mcp-server-production-872b.up.railway.app';
 
-// Session management (simplified)
-let sessionId = null;
-
 // Initialize MCP session
 async function initializeMCPSession() {
   try {
@@ -105,7 +102,7 @@ async function initializeMCPClient() {
 // Call MCP server
 async function callMCPServer(method, params = {}) {
   // Initialize MCP client first if not done
-  if (!mcpInitialized) {
+  if (!mcpInitialized || !mcpSessionId) {
     const initialized = await initializeMCPClient();
     if (!initialized) {
       throw new Error('Failed to initialize MCP client');
@@ -113,7 +110,7 @@ async function callMCPServer(method, params = {}) {
   }
   
   try {
-    console.log(`🔄 Calling MCP: ${method}`);
+    console.log(`🔄 Calling MCP: ${method} with session: ${mcpSessionId}`);
     
     const response = await axios.post(`${MCP_SERVER_URL}/mcp`, {
       jsonrpc: '2.0',
@@ -123,7 +120,8 @@ async function callMCPServer(method, params = {}) {
     }, {
       headers: { 
         'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream'
+        'Accept': 'application/json, text/event-stream',
+        'mcp-session-id': mcpSessionId
       }
     });
     
@@ -142,6 +140,7 @@ async function callMCPServer(method, params = {}) {
     });
     // Reset initialization on error
     mcpInitialized = false;
+    mcpSessionId = null;
     throw error;
   }
 }
