@@ -10,48 +10,13 @@ app.use(express.json());
 // Your existing MCP server URL
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'https://clickup-mcp-server-production-872b.up.railway.app';
 
-// Initialize MCP session
-async function initializeMCPSession() {
-  try {
-    console.log('🔄 Initializing MCP session...');
-    
-    // Get session from SSE endpoint with longer timeout and different approach
-    const sseResponse = await axios.get(`${MCP_SERVER_URL}/sse`, {
-      headers: { 
-        'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache'
-      },
-      timeout: 10000, // Increased timeout
-      responseType: 'text'
-    });
-    
-    console.log('📡 SSE Response:', sseResponse.data);
-    
-    // Extract session ID from SSE response
-    const match = sseResponse.data.match(/sessionId=([a-f0-9-]+)/);
-    if (match) {
-      sessionId = match[1];
-      console.log('✅ MCP Session initialized:', sessionId);
-      return sessionId;
-    } else {
-      console.log('⚠️ No session ID found in SSE response');
-    }
-  } catch (error) {
-    console.error('❌ Failed to initialize MCP session:', error.message);
-    
-    // Fallback: try to generate a simple session ID
-    sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-    console.log('🔄 Using fallback session ID:', sessionId);
-  }
-  return sessionId;
-}
-
-// MCP client state
+// MCP client state - Global variables
 let mcpInitialized = false;
+let sessionId = null;
 
 // Initialize MCP client properly
 async function initializeMCPClient() {
-  if (mcpInitialized) return true;
+  if (mcpInitialized && sessionId) return true;
   
   try {
     console.log('🔄 Initializing MCP client...');
@@ -82,10 +47,34 @@ async function initializeMCPClient() {
       hasData: !!initResponse.data
     });
     
+    // Extract session ID from response headers
+    sessionId = initResponse.headers['mcp-session-id'] || 
+                initResponse.headers['x-session-id'];
+    
+    // If no session ID in headers, try parsing from SSE response data
+    if (!sessionId && typeof initResponse.data === 'string') {
+      const sessionMatch = initResponse.data.match(/sessionId[=:]([a-f0-9-]+)/i);
+      if (sessionMatch) {
+        sessionId = sessionMatch[1];
+        console.log('🔍 Extracted session ID from response data');
+      }
+    }
+    
+    // Fallback: generate session ID
+    if (!sessionId) {
+      sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      console.log('🎲 Generated fallback session ID');
+    }
+    
+    console.log('🔑 Using session ID:', sessionId);
+    console.log('🔍 Session ID type:', typeof sessionId);
+    
     // Check if response is SSE format
     if (typeof initResponse.data === 'string' && initResponse.data.includes('event: message')) {
       console.log('📡 Received SSE format response');
+      console.log('📋 Response preview:', initResponse.data.substring(0, 300));
     }
+    
     mcpInitialized = true;
     return true;
   } catch (error) {
@@ -101,8 +90,12 @@ async function initializeMCPClient() {
 
 // Call MCP server
 async function callMCPServer(method, params = {}) {
+  console.log('🔍 Debug - mcpInitialized:', mcpInitialized);
+  console.log('🔍 Debug - sessionId:', sessionId);
+  console.log('🔍 Debug - sessionId type:', typeof sessionId);
+  
   // Initialize MCP client first if not done
-  if (!mcpInitialized || !mcpSessionId) {
+  if (!mcpInitialized || !sessionId) {
     const initialized = await initializeMCPClient();
     if (!initialized) {
       throw new Error('Failed to initialize MCP client');
@@ -110,7 +103,7 @@ async function callMCPServer(method, params = {}) {
   }
   
   try {
-    console.log(`🔄 Calling MCP: ${method} with session: ${mcpSessionId}`);
+    console.log(`🔄 Calling MCP: ${method} with session: ${sessionId}`);
     
     const response = await axios.post(`${MCP_SERVER_URL}/mcp`, {
       jsonrpc: '2.0',
@@ -121,7 +114,7 @@ async function callMCPServer(method, params = {}) {
       headers: { 
         'Content-Type': 'application/json',
         'Accept': 'application/json, text/event-stream',
-        'mcp-session-id': mcpSessionId
+        'mcp-session-id': sessionId
       }
     });
     
@@ -140,7 +133,7 @@ async function callMCPServer(method, params = {}) {
     });
     // Reset initialization on error
     mcpInitialized = false;
-    mcpSessionId = null;
+    sessionId = null;
     throw error;
   }
 }
