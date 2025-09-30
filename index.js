@@ -205,15 +205,82 @@ app.put('/task/:taskId', async (req, res) => {
   }
 });
 
-// Get workspace tasks with filtering
+// Get workspace tasks with filtering (OPTIMIZED FOR TOKENS)
 app.post('/tasks/search', async (req, res) => {
   try {
+    // STEP 1: Optimize parameters before calling MCP
+    const optimizedParams = {
+      ...req.body,
+      detail_level: "summary",        // Force lightweight mode
+      subtasks: false,               // No subtasks
+      include_closed: false,         // No closed tasks
+      include_archived_lists: false, // No archived lists
+      page: 0,                       // First page only
+      // Force recent date filter if not provided (last 7 days)
+      date_updated_gt: req.body.date_updated_gt || (Date.now() - (7 * 24 * 60 * 60 * 1000))
+    };
+    
+    // Limit list_ids to max 5 lists to prevent overload
+    if (optimizedParams.list_ids && optimizedParams.list_ids.length > 5) {
+      optimizedParams.list_ids = optimizedParams.list_ids.slice(0, 5);
+      console.log('⚠️ Limited list_ids to 5 for performance');
+    }
+    
+    console.log(`🔄 Calling get_workspace_tasks with optimized params`);
+    console.log(`📏 Request size: ${JSON.stringify(optimizedParams).length} chars`);
+    
     const result = await callMCPServer('tools/call', {
       name: 'get_workspace_tasks',
-      arguments: req.body
+      arguments: optimizedParams
     });
+    
+    // STEP 2: Filter the response to reduce tokens
+    if (result?.content?.[0]?.text) {
+      try {
+        const data = JSON.parse(result.content[0].text);
+        
+        if (data.tasks) {
+          console.log(`📊 Original tasks: ${data.tasks.length}`);
+          
+          // Limit to 50 tasks maximum
+          if (data.tasks.length > 50) {
+            data.tasks = data.tasks.slice(0, 50);
+            console.log(`✂️ Truncated to 50 tasks`);
+          }
+          
+          // Strip heavy fields from each task
+          data.tasks = data.tasks.map(task => ({
+            id: task.id,
+            name: task.name?.substring(0, 100), // Truncate long names
+            status: task.status?.status || task.status,
+            priority: task.priority?.priority || task.priority,
+            url: task.url,
+            list: { 
+              id: task.list?.id, 
+              name: task.list?.name?.substring(0, 50)
+            },
+            due_date: task.due_date,
+            assignees: task.assignees?.slice(0, 3).map(a => ({
+              id: a.id, 
+              username: a.username
+            })) || [],
+            tags: task.tags?.slice(0, 5).map(t => t.name || t) || []
+            // REMOVED: description, custom_fields, attachments, time_entries, etc.
+          }));
+          
+          // Update the response
+          result.content[0].text = JSON.stringify(data);
+          console.log(`✅ Filtered tasks: ${data.tasks.length}`);
+          console.log(`📉 Response size: ${JSON.stringify(result).length} chars`);
+        }
+      } catch (parseError) {
+        console.log('⚠️ Could not parse response for filtering:', parseError.message);
+      }
+    }
+    
     res.json(result);
   } catch (error) {
+    console.error('❌ Error in /tasks/search:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
